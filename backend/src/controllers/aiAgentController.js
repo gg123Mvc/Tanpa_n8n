@@ -33,13 +33,7 @@ export const sendMessageToAI = async (req, res) => {
     } else if (askGrad) {
       aiResponse = "Silakan masukkan Nomor Registrasi Anda.\n\nContoh:\nSPMB-2026-003";
     } else {
-      // Prioritaskan webhook n8n jika N8N_WEBHOOK_URL dikonfigurasi, fallback ke NeoXR
-      const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || process.env.VITE_N8N_WEBHOOK_URL;
-      if (n8nWebhookUrl) {
-        aiResponse = await callN8nChatWebhook(message, history, n8nWebhookUrl);
-      } else {
-        aiResponse = await callNeoXRAI(message, history);
-      }
+      aiResponse = await callNeoXRAI(message, history);
     }
 
     // Check for JSON action from AI
@@ -180,53 +174,6 @@ export const sendMessageToAI = async (req, res) => {
     const status = error?.response?.status || 500;
     const errorMessage = error?.response?.data?.message || error.message || 'Gagal memproses pesan';
     errorResponse(res, `Gagal memproses pesan (Status ${status}): ${errorMessage}`, ERROR_CODES.INTERNAL_ERROR);
-  }
-};
-
-// Call n8n Chat Webhook
-const callN8nChatWebhook = async (message, history = [], webhookUrl) => {
-  try {
-    const payload = {
-      action: "sendMessage",
-      chatInput: message,
-      message: message,
-      history: history
-    };
-
-    const response = await axios.post(webhookUrl, payload, {
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      timeout: 30000
-    });
-
-    const data = response.data;
-
-    if (typeof data === 'string') {
-      return data;
-    }
-
-    if (data?.output) {
-      return typeof data.output === 'string' ? data.output : JSON.stringify(data.output);
-    }
-    if (data?.text) {
-      return typeof data.text === 'string' ? data.text : JSON.stringify(data.text);
-    }
-    if (data?.message) {
-      return typeof data.message === 'string' ? data.message : JSON.stringify(data.message);
-    }
-    if (data?.response) {
-      return typeof data.response === 'string' ? data.response : JSON.stringify(data.response);
-    }
-
-    return JSON.stringify(data);
-  } catch (err) {
-    console.error('Gagal memanggil n8n webhook, beralih ke NeoXR fallback:', err.message);
-    // Jika n8n gagal / offline / error, otomatis fallback ke NeoXR jika API_NEOXR tersedia
-    if (process.env.API_NEOXR) {
-      return await callNeoXRAI(message, history);
-    }
-    throw new Error(`Gagal menghubungi webhook n8n: ${err.message}`);
   }
 };
 

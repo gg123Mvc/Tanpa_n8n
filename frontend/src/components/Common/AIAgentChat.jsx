@@ -286,13 +286,13 @@ Silakan ketik pertanyaan atau kebutuhan Anda, misalnya:
                               </span>
                             </div>
                           </div>
-                          {(chat.responseTimeMs || chat.response_time_ms) ? (
-                            <div className="flex gap-2 items-center text-[10px] text-gray-500 ml-1 mt-0.5 font-medium">
-                              <span className="bg-gray-100/90 border border-gray-200/80 px-2 py-0.5 rounded-md text-gray-600 shadow-xs flex items-center gap-1">
-                                <span>⏱️</span> Response time: {formatResponseTime(chat.responseTimeMs || chat.response_time_ms)}
+                          {(chat.responseTimeMs || chat.response_time_ms) && (
+                            <div className="flex gap-2 items-center text-[10px] text-gray-500 ml-1 mt-0.5">
+                              <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
+                                ⏱️ Response time: {formatResponseTime(chat.responseTimeMs || chat.response_time_ms)}
                               </span>
                             </div>
-                          ) : null}
+                          )}
                         </div>
                       </div>
                     ) : (
