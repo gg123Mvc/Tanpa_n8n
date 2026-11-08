@@ -4,8 +4,12 @@ import { createChat } from '@n8n/chat';
 
 const AIAgentChat = () => {
   useEffect(() => {
+    const webhookUrl =
+      import.meta.env.VITE_N8N_WEBHOOK_URL ||
+      'https://sekolahku-sekolahku.t4t2am.easypanel.host/webhook/470d12f5-4c3d-4234-b5bd-7a13e88779f5/chat';
+
     createChat({
-      webhookUrl: 'https://sekolahku-sekolahku.t4t2am.easypanel.host/webhook/470d12f5-4c3d-4234-b5bd-7a13e88779f5/chat',
+      webhookUrl,
       mode: 'window',
       showWelcomeScreen: false,
       initialMessages: [
