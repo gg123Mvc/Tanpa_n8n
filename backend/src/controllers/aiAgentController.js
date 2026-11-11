@@ -1,167 +1,27 @@
-import supabase from '../config/database.js';
 import { successResponse, errorResponse, ERROR_CODES } from '../utils/errors.js';
 import axios from 'axios';
 
-// Send Message to AI Agent
+// Send Message to AI Agent (100% diproses n8n, tanpa koneksi ke database)
 export const sendMessageToAI = async (req, res) => {
   try {
     const { message, history } = req.body;
-    const user = req.user;
 
     if (!message || message.trim() === '') {
       return errorResponse(res, 'Pesan tidak boleh kosong', ERROR_CODES.VALIDATION_ERROR);
     }
 
     const startTime = Date.now();
-    let aiResponse = "";
-    
-    // Interceptor: Deteksi otomatis nomor registrasi atau tiket untuk mempercepat respon 
-    const msgUpper = message.trim().toUpperCase();
-    const ticketMatch = msgUpper.match(/(CMP-\d{8}-\d{5})/);
-    const gradMatch = msgUpper.match(/(SPMB-\d{4}-\d{3,4}|REG\d+)/);
-    
-    const askGrad = msgUpper.match(/(CEK KELULUSAN|HASIL SELEKSI|STATUS KELULUSAN|PENGUMUMAN|LULUS ATAU TIDAK)/);
-    const askTicket = msgUpper.match(/(CEK TIKET|STATUS PENGADUAN|CEK PENGADUAN|LACAK PENGADUAN)/);
 
-    if (ticketMatch) {
-      aiResponse = JSON.stringify({ action: 'check_ticket', ticket_number: ticketMatch[1] });
-    } else if (gradMatch) {
-      aiResponse = JSON.stringify({ action: 'check_graduation', registration_number: gradMatch[1] });
-    } else if (askTicket) {
-      aiResponse = "Silakan masukkan Nomor Tiket Pengaduan Anda.\n\nContoh:\nCMP-20260710-00015";
-    } else if (askGrad) {
-      aiResponse = "Silakan masukkan Nomor Registrasi Anda.\n\nContoh:\nSPMB-2026-003";
-    } else {
-      // Proses chat sepenuhnya melalui webhook n8n
-      const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || process.env.VITE_N8N_WEBHOOK_URL || 'https://sekolahku-sekolahku.t4t2am.easypanel.host/webhook/470d12f5-4c3d-4234-b5bd-7a13e88779f5/chat';
-      aiResponse = await callN8nChatWebhook(message, history, n8nWebhookUrl);
-    }
+    // Proses pesan chat sepenuhnya melalui webhook n8n
+    const n8nWebhookUrl =
+      process.env.N8N_WEBHOOK_URL ||
+      process.env.VITE_N8N_WEBHOOK_URL ||
+      'https://sekolahku-sekolahku.t4t2am.easypanel.host/webhook/470d12f5-4c3d-4234-b5bd-7a13e88779f5/chat';
 
-    // Check for JSON action from AI
-    const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      try {
-        const actionData = JSON.parse(jsonMatch[0]);
-        if (actionData.action === 'create_complaint') {
-          try {
-            const dateStr = new Date().toISOString().slice(0,10).replace(/-/g, '');
-
-            // Get last ticket number for today
-            const { data: lastTicket } = await supabase
-              .from('complaints')
-              .select('ticket_number')
-              .like('ticket_number', `CMP-${dateStr}-%`)
-              .order('id', { ascending: false })
-              .limit(1)
-              .maybeSingle();
-
-            let nextNum = 1;
-            if (lastTicket) {
-              const lastNum = parseInt(lastTicket.ticket_number.split('-')[2]);
-              nextNum = lastNum + 1;
-            }
-            const ticketNumber = `CMP-${dateStr}-${String(nextNum).padStart(5, '0')}`;
-            
-            const userId = (user && user.userId) ? user.userId : null;
-            
-            const { error: insertError } = await supabase.from('complaints').insert({
-              ticket_number: ticketNumber,
-              user_id: userId,
-              category: actionData.category || 'Lainnya',
-              priority: actionData.priority || 'Low',
-              complaint: actionData.complaint || message,
-              summary: actionData.summary || 'Pengaduan pengguna',
-              status: 'Menunggu'
-            });
-
-            if (insertError) throw insertError;
-            
-            aiResponse = `====================================================\n\nTerima kasih.\n\nPengaduan Anda telah berhasil dicatat.\n\nNomor Tiket:\n${ticketNumber}\n\nKategori:\n${actionData.category || 'Lainnya'}\n\nStatus:\nMenunggu\n\nSilakan simpan nomor tiket tersebut untuk melakukan pengecekan status melalui MAIRA AI.\n\n====================================================`;
-          } catch (dbErr) {
-            console.error('Failed to create complaint:', dbErr);
-            aiResponse = `Mohon maaf.\n\nSaat ini pengaduan belum dapat diproses karena terjadi gangguan sistem.\n\nSilakan mencoba beberapa saat lagi atau menghubungi Admin SPMB.`;
-          }
-        } else if (actionData.action === 'check_ticket') {
-          try {
-            const { data: ticket, error } = await supabase
-              .from('complaints')
-              .select('*')
-              .eq('ticket_number', actionData.ticket_number)
-              .maybeSingle();
-
-            if (error) throw error;
-            
-            if (ticket) {
-              const dateObj = new Date(ticket.updated_at);
-              const pad = (n) => String(n).padStart(2, '0');
-              const updatedAt = `${dateObj.getFullYear()}-${pad(dateObj.getMonth()+1)}-${pad(dateObj.getDate())} ${pad(dateObj.getHours())}:${pad(dateObj.getMinutes())}`;
-              
-              aiResponse = `🎫 STATUS PENGADUAN\n\nNomor Tiket\n${ticket.ticket_number}\n\nStatus\n${ticket.status}\n\nCatatan Admin\n${ticket.admin_note || '-'}\n\nTerakhir Diperbarui\n${updatedAt}`;
-            } else {
-              aiResponse = `Mohon maaf.\n\nNomor Tiket tidak ditemukan.\n\nSilakan periksa kembali Nomor Tiket Pengaduan Anda.`;
-            }
-          } catch (dbErr) {
-            console.error('Failed to check ticket:', dbErr);
-            aiResponse = `Mohon maaf. Saat ini pengecekan status belum dapat diproses karena terjadi gangguan sistem. Silakan mencoba beberapa saat lagi.`;
-          }
-        } else if (actionData.action === 'check_graduation') {
-          try {
-            const { data: rows, error } = await supabase
-              .from('users')
-              .select('registration_number, full_name, registration_status, school_data ( major_choice )')
-              .eq('registration_number', actionData.registration_number)
-              .maybeSingle();
-
-            if (error) throw error;
-            
-            if (rows) {
-              let statusText = '';
-              let messageText = '';
-              
-              if (rows.registration_status === 'accepted') {
-                statusText = '✅ LULUS';
-                messageText = 'Selamat. Silakan melakukan daftar ulang sesuai jadwal yang telah ditentukan.';
-              } else if (rows.registration_status === 'rejected') {
-                statusText = '❌ TIDAK LULUS';
-                messageText = 'Terima kasih telah mengikuti proses seleksi. Semoga sukses pada kesempatan berikutnya.';
-              } else if (rows.registration_status === 'revision') {
-                statusText = '⚠️ PERLU REVISI';
-                messageText = 'Dokumen Anda perlu diperbaiki. Silakan login ke dashboard untuk melihat detail revisi.';
-              } else {
-                statusText = '⏳ DALAM PROSES / BELUM DIVERIFIKASI';
-                messageText = 'Pendaftaran Anda sedang dalam antrean pengecekan oleh panitia. Mohon cek kembali secara berkala.';
-              }
-              
-              aiResponse = `🎓 HASIL SELEKSI PMB\n\nNomor Registrasi\n${rows.registration_number}\n\nNama\n${rows.full_name}\n\nProgram\n${rows.school_data?.major_choice || '-'}\n\nStatus\n${statusText}\n\n${messageText}`;
-            } else {
-              aiResponse = `Mohon maaf.\n\nNomor Registrasi tidak ditemukan.\n\nSilakan periksa kembali Nomor Registrasi Anda.`;
-            }
-          } catch (dbErr) {
-            console.error('Failed to check graduation:', dbErr);
-            aiResponse = `Mohon maaf. Saat ini pengecekan kelulusan belum dapat diproses karena terjadi gangguan sistem. Silakan mencoba beberapa saat lagi.`;
-          }
-        } else if (actionData.action === 'check_route') {
-          aiResponse = "📍 **Cek Jarak ke Sekolah**\n\nUntuk menghitung jarak dari lokasi Anda ke sekolah, silakan gunakan fitur **Cek Jarak** yang tersedia di halaman ini.\n\nFitur tersebut akan meminta izin akses lokasi GPS perangkat Anda untuk menentukan titik awal secara akurat.\n\nJarak dan estimasi waktu perjalanan akan dihitung secara otomatis setelah izin diberikan.";
-        }
-      } catch(e) {
-        // Not a valid JSON or not our action format, just continue with original response
-      }
-    }
+    const aiResponse = await callN8nChatWebhook(message, history, n8nWebhookUrl);
 
     const endTime = Date.now();
     const responseTimeMs = endTime - startTime;
-
-    // Save to DB only if user is logged in
-    if (user && user.userId) {
-      const { error: historyError } = await supabase.from('chat_history').insert({
-        user_id: user.userId,
-        message,
-        response: aiResponse,
-        message_type: 'ai_agent',
-        response_time_ms: responseTimeMs
-      });
-      if (historyError) console.error('Failed to save chat history:', historyError.message);
-    }
 
     successResponse(res, {
       user_message: message,
@@ -225,54 +85,17 @@ const callN8nChatWebhook = async (message, history = [], webhookUrl) => {
   }
 };
 
-// Get Chat History
+// Get Chat History (Tidak menggunakan database)
 export const getChatHistory = async (req, res) => {
-  try {
-    const user = req.user;
-    
-    if (!user || !user.userId) {
-      return successResponse(res, [], 'Guest history empty');
-    }
-
-    const { data, error } = await supabase
-      .from('chat_history')
-      .select('user_id, message, response, message_type, created_at, response_time_ms')
-      .eq('user_id', user.userId)
-      .order('created_at', { ascending: true })
-      .limit(50);
-
-    if (error) throw error;
-
-    successResponse(res, data || [], 'Chat history berhasil diambil');
-  } catch (error) {
-    console.error(error);
-    errorResponse(res, 'Terjadi kesalahan', ERROR_CODES.INTERNAL_ERROR);
-  }
+  return successResponse(res, [], 'Chat history tidak disimpan di database');
 };
 
-// Clear Chat History
+// Clear Chat History (Tidak menggunakan database)
 export const clearChatHistory = async (req, res) => {
-  try {
-    const user = req.user;
-    if (!user || !user.userId) {
-      return successResponse(res, {}, 'Guest chat history cleared');
-    }
-
-    const { error } = await supabase
-      .from('chat_history')
-      .delete()
-      .eq('user_id', user.userId);
-
-    if (error) throw error;
-
-    successResponse(res, {}, 'Chat history berhasil dihapus');
-  } catch (error) {
-    console.error(error);
-    errorResponse(res, 'Terjadi kesalahan', ERROR_CODES.INTERNAL_ERROR);
-  }
+  return successResponse(res, {}, 'Chat history tidak disimpan di database');
 };
 
-// Calculate Distance from GPS Coordinates (GPS-only, no manual input)
+// Calculate Distance from GPS Coordinates (GPS-only, no manual input, no database)
 export const calculateDistanceFromGPS = async (req, res) => {
   try {
     const { userLat, userLon, accuracy } = req.body;
@@ -306,7 +129,6 @@ export const calculateDistanceFromGPS = async (req, res) => {
     const straightLineKm = parseFloat((R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(2));
 
     // Hitung rute perjalanan tercepat via OSRM (Profil Driving/Mobil)
-    // Gunakan daftar endpoint dengan fallback untuk keandalan maksimal
     const osrmEndpoints = [
       `https://router.project-osrm.org/route/v1/driving/${lon},${lat};${schoolLon},${schoolLat}?overview=full&geometries=geojson&alternatives=true`,
       `https://routing.openstreetmap.de/routed-car/route/v1/driving/${lon},${lat};${schoolLon},${schoolLat}?overview=full&geometries=geojson&alternatives=true`
@@ -358,7 +180,6 @@ export const calculateDistanceFromGPS = async (req, res) => {
             alternatives
           };
 
-          // Berhasil mengambil rute dari endpoint, hentikan iterasi endpoint fallback
           break;
         }
       } catch (err) {
@@ -367,8 +188,8 @@ export const calculateDistanceFromGPS = async (req, res) => {
     }
 
     successResponse(res, {
-      route: routeData, // null jika layanan routing gagal / rute jalan tidak ditemukan
-      straightLineKm,   // estimasi garis lurus sebagai data pelengkap/fallback
+      route: routeData,
+      straightLineKm,
       school: {
         name: schoolName,
         address: schoolAddress,

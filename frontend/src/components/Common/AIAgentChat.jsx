@@ -78,35 +78,16 @@ Silakan ketik pertanyaan atau kebutuhan Anda, misalnya:
 
 💡 Anda tidak perlu menggunakan format khusus. Cukup ketik pertanyaan atau permasalahan Anda, dan MAIRA AI akan membantu memprosesnya secara otomatis.`;
 
-  // Load chat history on mount
+  // Set initial welcome message on mount (tanpa database)
   useEffect(() => {
-    const loadHistory = async () => {
-      try {
-        const response = await aiAgentAPI.getHistory();
-        if (response.data.success) {
-          if (!response.data.data || response.data.data.length === 0) {
-            setChatHistory([{
-              aiResponse: welcomeMessageText,
-              timestamp: new Date().toISOString(),
-              aiTimestamp: new Date().toISOString(),
-              isWelcomeMessage: true
-            }]);
-          } else {
-            setChatHistory(response.data.data);
-          }
-        }
-      } catch (error) {
-        console.error('Error loading chat history, setting default welcome message:', error);
-        setChatHistory([{
-          aiResponse: welcomeMessageText,
-          timestamp: new Date().toISOString(),
-          aiTimestamp: new Date().toISOString(),
-          isWelcomeMessage: true
-        }]);
-      }
-    };
-
-    loadHistory();
+    if (chatHistory.length === 0) {
+      setChatHistory([{
+        aiResponse: welcomeMessageText,
+        timestamp: new Date().toISOString(),
+        aiTimestamp: new Date().toISOString(),
+        isWelcomeMessage: true
+      }]);
+    }
   }, []);
 
   // Auto-scroll to bottom
@@ -139,62 +120,66 @@ Silakan ketik pertanyaan atau kebutuhan Anda, misalnya:
     setLoading(true);
     setAILoading(true);
 
+    const n8nWebhookUrl =
+      import.meta.env.VITE_N8N_WEBHOOK_URL ||
+      'https://sekolahku-sekolahku.t4t2am.easypanel.host/webhook/470d12f5-4c3d-4234-b5bd-7a13e88779f5/chat';
+
     try {
-      // Get the last 2 messages for context to send to backend
+      // Prioritaskan pengiriman langsung ke n8n webhook (tanpa database)
       const contextHistory = chatHistory.slice(-2).map(chat => ({
         user: chat.userMessage || chat.message,
         ai: chat.aiResponse || chat.response
       }));
 
-      const response = await aiAgentAPI.sendMessage(userMsg, contextHistory);
+      const n8nRes = await axios.post(n8nWebhookUrl, {
+        action: "sendMessage",
+        chatInput: userMsg,
+        message: userMsg,
+        history: contextHistory
+      }, { timeout: 30000 });
 
-      if (response.data.success) {
-        const aiResponse = response.data.data.ai_response;
-        const timestamp = response.data.data.timestamp || new Date();
-        const responseTimeMs = response.data.data.response_time_ms ?? (Date.now() - clientStartTime);
+      const data = n8nRes.data;
+      let item = Array.isArray(data) && data.length > 0 ? data[0] : data;
+      const aiResponse =
+        typeof item === 'string'
+          ? item
+          : (item?.output || item?.text || item?.message || item?.response || JSON.stringify(item));
 
-        updateMessageResponse(tempId, aiResponse, timestamp, responseTimeMs);
+      const responseTimeMs = Date.now() - clientStartTime;
+      const timestamp = new Date();
 
-        if (inputRef.current) {
-          inputRef.current.focus();
-        }
+      updateMessageResponse(tempId, aiResponse, timestamp, responseTimeMs);
+
+      if (inputRef.current) {
+        inputRef.current.focus();
       }
-    } catch (error) {
-      console.warn('Backend aiAgentAPI failed, attempting fallback to direct n8n webhook...', error);
-
-      // Fallback: If backend is not available, try calling n8n webhook directly
-      const n8nWebhookUrl =
-        import.meta.env.VITE_N8N_WEBHOOK_URL ||
-        'https://sekolahku-sekolahku.t4t2am.easypanel.host/webhook/470d12f5-4c3d-4234-b5bd-7a13e88779f5/chat';
+    } catch (n8nError) {
+      console.warn('Direct n8n webhook failed, attempting backend proxy (tanpa database)...', n8nError);
 
       try {
-        const n8nRes = await axios.post(n8nWebhookUrl, {
-          action: "sendMessage",
-          chatInput: userMsg,
-          message: userMsg
-        }, { timeout: 30000 });
+        const contextHistory = chatHistory.slice(-2).map(chat => ({
+          user: chat.userMessage || chat.message,
+          ai: chat.aiResponse || chat.response
+        }));
 
-        const data = n8nRes.data;
-        let item = Array.isArray(data) && data.length > 0 ? data[0] : data;
-        const aiResponse =
-          typeof item === 'string'
-            ? item
-            : (item?.output || item?.text || item?.message || item?.response || JSON.stringify(item));
+        const response = await aiAgentAPI.sendMessage(userMsg, contextHistory);
 
-        const responseTimeMs = Date.now() - clientStartTime;
-        const timestamp = new Date();
+        if (response.data.success) {
+          const aiResponse = response.data.data.ai_response;
+          const timestamp = response.data.data.timestamp || new Date();
+          const responseTimeMs = response.data.data.response_time_ms ?? (Date.now() - clientStartTime);
 
-        updateMessageResponse(tempId, aiResponse, timestamp, responseTimeMs);
+          updateMessageResponse(tempId, aiResponse, timestamp, responseTimeMs);
 
-        if (inputRef.current) {
-          inputRef.current.focus();
+          if (inputRef.current) {
+            inputRef.current.focus();
+          }
         }
-      } catch (n8nErr) {
-        const errorMsg = error.response?.data?.message || n8nErr.message || 'Gagal mengirim pesan';
+      } catch (backendError) {
+        const errorMsg = n8nError.response?.data?.message || n8nError.message || 'Gagal mengirim pesan';
         toast.error(errorMsg);
-        console.error('AI Chat Error:', error, n8nErr);
+        console.error('AI Chat Error:', n8nError, backendError);
 
-        // Replace the typing indicator with an error message so it doesn't get stuck
         updateMessageResponse(
           tempId,
           'Maaf, saat ini terjadi kendala koneksi ke server AI. Silakan coba beberapa saat lagi.',
@@ -208,14 +193,8 @@ Silakan ketik pertanyaan atau kebutuhan Anda, misalnya:
     }
   };
 
-  const handleClearChat = async () => {
+  const handleClearChat = () => {
     if (!window.confirm('Hapus semua chat?')) return;
-
-    try {
-      await aiAgentAPI.clearHistory();
-    } catch (error) {
-      console.warn('Error clearing backend history:', error);
-    }
 
     setChatHistory([{
       aiResponse: welcomeMessageText,
