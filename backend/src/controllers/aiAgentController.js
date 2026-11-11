@@ -1,7 +1,6 @@
 import supabase from '../config/database.js';
 import { successResponse, errorResponse, ERROR_CODES } from '../utils/errors.js';
 import axios from 'axios';
-import { getFormattedKnowledgeBase } from './knowledgeBaseController.js';
 
 // Send Message to AI Agent
 export const sendMessageToAI = async (req, res) => {
@@ -33,13 +32,9 @@ export const sendMessageToAI = async (req, res) => {
     } else if (askGrad) {
       aiResponse = "Silakan masukkan Nomor Registrasi Anda.\n\nContoh:\nSPMB-2026-003";
     } else {
-      // Prioritaskan webhook n8n jika N8N_WEBHOOK_URL dikonfigurasi, fallback ke NeoXR
-      const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || process.env.VITE_N8N_WEBHOOK_URL;
-      if (n8nWebhookUrl) {
-        aiResponse = await callN8nChatWebhook(message, history, n8nWebhookUrl);
-      } else {
-        aiResponse = await callNeoXRAI(message, history);
-      }
+      // Proses chat sepenuhnya melalui webhook n8n
+      const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || process.env.VITE_N8N_WEBHOOK_URL || 'https://sekolahku-sekolahku.t4t2am.easypanel.host/webhook/470d12f5-4c3d-4234-b5bd-7a13e88779f5/chat';
+      aiResponse = await callN8nChatWebhook(message, history, n8nWebhookUrl);
     }
 
     // Check for JSON action from AI
@@ -200,15 +195,11 @@ const callN8nChatWebhook = async (message, history = [], webhookUrl) => {
       timeout: 30000
     });
 
-<<<<<<< HEAD
     let data = response.data;
 
     if (Array.isArray(data) && data.length > 0) {
       data = data[0];
     }
-=======
-    const data = response.data;
->>>>>>> bed9b3006eec6d3cfac6d16af25be0bd487e8267
 
     if (typeof data === 'string') {
       return data;
@@ -229,148 +220,8 @@ const callN8nChatWebhook = async (message, history = [], webhookUrl) => {
 
     return JSON.stringify(data);
   } catch (err) {
-    console.error('Gagal memanggil n8n webhook, beralih ke NeoXR fallback:', err.message);
-    // Jika n8n gagal / offline / error, otomatis fallback ke NeoXR jika API_NEOXR tersedia
-    if (process.env.API_NEOXR) {
-      return await callNeoXRAI(message, history);
-    }
+    console.error('Gagal memanggil webhook n8n:', err.message);
     throw new Error(`Gagal menghubungi webhook n8n: ${err.message}`);
-  }
-};
-
-// Call NeoXR GPT-4 API
-const callNeoXRAI = async (message, history = []) => {
-  const apiKey = process.env.API_NEOXR;
-  if (!apiKey) {
-    throw new Error('API_NEOXR tidak ditemukan dalam konfigurasi environment (.env)');
-  }
-  const url = "https://api.neoxr.eu/api/gpt4";
-
-  let historyText = "";
-  if (Array.isArray(history) && history.length > 0) {
-    historyText = "\n\nRiwayat Percakapan Sebelumnya:\n" + history.map(h => {
-      const aiTruncated = h.ai ? (h.ai.length > 250 ? h.ai.substring(0, 250) + '...' : h.ai) : '';
-      return `User: ${h.user}\nMAIRA AI: ${aiTruncated}`;
-    }).join("\n");
-  }
-
-  const knowledgeBaseText = await getFormattedKnowledgeBase();
-
-  const systemPrompt = `Nama Anda adalah MAIRA AI (Madrasah AI Response Assistant), asisten virtual resmi MA Bina Cendekia.
-Tugas utama Anda adalah memberikan layanan informasi dan menerima pengaduan terkait Sistem Penerimaan Murid Baru (SPMB).
-
-=========================================================
-ATURAN UMUM
-=========================================================
-1. Jawab:
-${knowledgeBaseText}
-2. JANGAN buat info di luar Knowledge Base.
-3. Gunakan bahasa sopan & profesional.
-4. Jika ada keluhan/error (PENGADUAN), ikuti aturan di bawah.
-=========================================================
-PRIORITAS PERINTAH (TIDAK BOLEH PAKAI KNOWLEDGE BASE)
-=========================================================
-1. Cek Kelulusan
-2. Cek Status Pengaduan
-3. Jarak/Rute
-4. Buat Pengaduan
-
-=========================================================
-=========================================================
-IDENTIFIKASI & PENANGANAN PENGADUAN
-=========================================================
-Pesan keluhan/error sistem (misal: gagal login/daftar, web error, kritik) = PENGADUAN.
-AI menentukan otomatis: Category, Priority (High/Medium/Low), dan Summary.
-JANGAN MINTA pengguna mengisi format JSON/kategori. HANYA minta info kurang (misal No. Registrasi).
-Jika lengkap, AI merespons HANYA dengan JSON internal (tanpa teks lain):
-{
-    "action":"create_complaint",
-    "category":"Upload Dokumen",
-    "priority":"Medium",
-    "complaint":"<pesan pengguna>",
-    "summary":"<ringkasan singkat>"
-}
-
-=========================================================
-=========================================================
-DETEKSI NOMOR REGISTRASI (CEK KELULUSAN)
-=========================================================
-Nomor Registrasi format SPMB-XXXX-XXX atau REGXXXX.
-Jika pengguna menyebut No. Registrasi ATAU meminta cek kelulusan + nomornya, AI WAJIB merespons HANYA dengan JSON:
-{
-    "action":"check_graduation",
-    "registration_number":"<nomor>"
-}
-JANGAN jawab dengan Knowledge Base atau teks lain.
-Jika minta cek tanpa nomor, minta nomor registrasinya.
-
-=========================================================
-PENGECEKAN STATUS PENGADUAN
-=========================================================
-Nomor Tiket format CMP-XXXX.
-Jika ada kata "cek tiket", "status pengaduan" ATAU menyebut Nomor Tiket, AI WAJIB merespons HANYA dengan JSON:
-{
-   "action":"check_ticket",
-   "ticket_number":"<nomor>"
-}
-Jika minta cek tanpa nomor tiket, minta nomornya.
-
-=========================================================
-PENGECEKAN JARAK DAN RUTE KE SEKOLAH
-=========================================================
-Jika pengguna bertanya tentang jarak, rute, atau lokasi ke sekolah (misal: "berapa jarak ke sekolah?", "cek jarak saya ke sekolah", "rute dari tempat saya ke sekolah"), AI WAJIB merespons dengan teks panduan berikut:
-
-"📍 Untuk mengecek jarak dari lokasi Anda ke sekolah, silakan gunakan fitur **Cek Jarak** yang tersedia di halaman ini. Fitur tersebut menggunakan GPS perangkat Anda untuk menentukan lokasi secara akurat, lalu menghitung jarak dan estimasi waktu perjalanan ke MA Bina Cendekia secara otomatis. Cukup klik tombol **Cek Jarak** dan berikan izin akses lokasi ketika diminta."
-
-AI DILARANG KERAS:
-- Meminta pengguna memasukkan nama desa, kecamatan, atau lokasi secara manual.
-- Mengaku sudah mengetahui lokasi pengguna sebelum GPS berhasil memperoleh koordinat.
-- Memberikan hasil jarak atau estimasi waktu tanpa data koordinat GPS nyata.
-- Menawarkan lokasi patokan manual sebagai alternatif.
-=========================================================
-PRIORITAS ACTION & Knowledge Base
-=========================================================
-1. No Tiket (CMP-xxxx) → check_ticket
-2. No Registrasi (SPMB-xxxx / REGxxxx) → check_graduation
-3. Jarak/Rute → Arahkan ke fitur Cek Jarak GPS (teks panduan, BUKAN JSON)
-4. Pengaduan → create_complaint
-5. Selain itu → Knowledge Base
-=========================================================
-${historyText}
-
-Tanya: ${message}`;
-
-  try {
-    const response = await axios.get(url, {
-      params: {
-        q: systemPrompt,
-        apikey: apiKey
-      },
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json'
-      },
-      timeout: 30000 
-    });
-
-    let text = '';
-    if (response.data && response.data.status) {
-      if (typeof response.data.data === 'object' && response.data.data.message) {
-        text = response.data.data.message;
-      } else if (typeof response.data.data === 'string') {
-        text = response.data.data;
-      }
-    }
-
-    if (!text) {
-      console.error('NeoXR Invalid Response Format:', JSON.stringify(response.data));
-      throw new Error('Format respons AI tidak valid atau kosong');
-    }
-    
-    return String(text);
-  } catch (err) {
-    console.error('NeoXR API Call Error:', err.message);
-    throw err;
   }
 };
 

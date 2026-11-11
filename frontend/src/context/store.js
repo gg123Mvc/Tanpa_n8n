@@ -151,11 +151,8 @@ export const useAIAgentStore = create((set) => ({
           id: Date.now(),
           userMessage,
           aiResponse,
-<<<<<<< HEAD
           userTimestamp: timestamp || new Date(),
           aiTimestamp: timestamp || new Date(),
-=======
->>>>>>> bed9b3006eec6d3cfac6d16af25be0bd487e8267
           timestamp: timestamp || new Date(),
           responseTimeMs: responseTimeMs,
         },
@@ -170,10 +167,7 @@ export const useAIAgentStore = create((set) => ({
           id,
           userMessage,
           aiResponse: null,
-<<<<<<< HEAD
           userTimestamp: timestamp || new Date(),
-=======
->>>>>>> bed9b3006eec6d3cfac6d16af25be0bd487e8267
           timestamp: timestamp || new Date(),
         },
       ],
@@ -183,7 +177,6 @@ export const useAIAgentStore = create((set) => ({
     set((state) => ({
       chatHistory: state.chatHistory.map((chat) =>
         chat.id === id
-<<<<<<< HEAD
           ? {
               ...chat,
               aiResponse,
@@ -191,9 +184,6 @@ export const useAIAgentStore = create((set) => ({
               timestamp: timestamp || chat.timestamp,
               responseTimeMs,
             }
-=======
-          ? { ...chat, aiResponse, timestamp: timestamp || chat.timestamp, responseTimeMs }
->>>>>>> bed9b3006eec6d3cfac6d16af25be0bd487e8267
           : chat
       ),
     })),
