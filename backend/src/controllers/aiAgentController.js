@@ -200,11 +200,15 @@ const callN8nChatWebhook = async (message, history = [], webhookUrl) => {
       timeout: 30000
     });
 
+<<<<<<< HEAD
     let data = response.data;
 
     if (Array.isArray(data) && data.length > 0) {
       data = data[0];
     }
+=======
+    const data = response.data;
+>>>>>>> bed9b3006eec6d3cfac6d16af25be0bd487e8267
 
     if (typeof data === 'string') {
       return data;
