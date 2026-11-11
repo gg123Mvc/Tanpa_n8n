@@ -27,17 +27,17 @@ app.use(express.urlencoded({ extended: true }));
 // Serve uploads folder
 app.use('/uploads', express.static('uploads'));
 
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/form', formRoutes);
-app.use('/api/documents', documentRoutes);
-app.use('/api/ai-agent', aiAgentRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/admin/knowledge-base', knowledgeBaseRoutes);
+// API Routes (Support with and without /api prefix for local and Vercel serverless functions)
+app.use(['/api/auth', '/auth'], authRoutes);
+app.use(['/api/form', '/form'], formRoutes);
+app.use(['/api/documents', '/documents'], documentRoutes);
+app.use(['/api/ai-agent', '/ai-agent'], aiAgentRoutes);
+app.use(['/api/dashboard', '/dashboard'], dashboardRoutes);
+app.use(['/api/admin', '/admin'], adminRoutes);
+app.use(['/api/admin/knowledge-base', '/admin/knowledge-base'], knowledgeBaseRoutes);
 
 // Health Check Route
-app.get('/api/health', (req, res) => {
+app.get(['/api/health', '/health'], (req, res) => {
   res.json({ status: 'OK', timestamp: new Date() });
 });
 

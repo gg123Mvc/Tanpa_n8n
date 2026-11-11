@@ -95,6 +95,17 @@ Silakan ketik pertanyaan atau kebutuhan Anda, misalnya:
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatHistory]);
 
+  const getSessionId = () => {
+    let sid = localStorage.getItem('n8n-chat/sessionId');
+    if (!sid) {
+      sid = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : 'sess-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+      localStorage.setItem('n8n-chat/sessionId', sid);
+    }
+    return sid;
+  };
+
   const handleSendMessage = async (e) => {
     e.preventDefault();
 
@@ -124,26 +135,49 @@ Silakan ketik pertanyaan atau kebutuhan Anda, misalnya:
       import.meta.env.VITE_N8N_WEBHOOK_URL ||
       'https://sekolahku-sekolahku.t4t2am.easypanel.host/webhook/470d12f5-4c3d-4234-b5bd-7a13e88779f5/chat';
 
+    const sessionId = getSessionId();
+
     try {
-      // Prioritaskan pengiriman langsung ke n8n webhook (tanpa database)
-      const contextHistory = chatHistory.slice(-2).map(chat => ({
-        user: chat.userMessage || chat.message,
-        ai: chat.aiResponse || chat.response
-      }));
+      // 1. Panggil langsung webhook n8n menggunakan native fetch
+      // Native fetch dengan headers Content-Type murni memastikan tidak ada penolakan CORS preflight
+      // dan tidak terkena limit timeout 10 detik serverless Vercel.
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 detik
 
-      const n8nRes = await axios.post(n8nWebhookUrl, {
-        action: "sendMessage",
-        chatInput: userMsg,
-        message: userMsg,
-        history: contextHistory
-      }, { timeout: 30000 });
+      const response = await fetch(n8nWebhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          action: 'sendMessage',
+          sessionId: sessionId,
+          chatInput: userMsg,
+          message: userMsg
+        }),
+        signal: controller.signal
+      });
 
-      const data = n8nRes.data;
-      let item = Array.isArray(data) && data.length > 0 ? data[0] : data;
-      const aiResponse =
-        typeof item === 'string'
-          ? item
-          : (item?.output || item?.text || item?.message || item?.response || JSON.stringify(item));
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const rawText = await response.text();
+      let aiResponse = '';
+
+      try {
+        const data = JSON.parse(rawText);
+        let item = Array.isArray(data) && data.length > 0 ? data[0] : data;
+        aiResponse =
+          typeof item === 'string'
+            ? item
+            : (item?.output || item?.text || item?.message || item?.response || item?.data || item?.result || item?.content || JSON.stringify(item));
+      } catch {
+        // Jika response berupa plain text
+        aiResponse = rawText;
+      }
 
       const responseTimeMs = Date.now() - clientStartTime;
       const timestamp = new Date();
@@ -154,39 +188,47 @@ Silakan ketik pertanyaan atau kebutuhan Anda, misalnya:
         inputRef.current.focus();
       }
     } catch (n8nError) {
-      console.warn('Direct n8n webhook failed, attempting backend proxy (tanpa database)...', n8nError);
+      console.warn('Direct n8n fetch failed, attempting backend proxy...', n8nError);
 
       try {
+        // Fallback melalui backend proxy jika direct fetch gagal
         const contextHistory = chatHistory.slice(-2).map(chat => ({
           user: chat.userMessage || chat.message,
           ai: chat.aiResponse || chat.response
         }));
 
-        const response = await aiAgentAPI.sendMessage(userMsg, contextHistory);
+        const res = await aiAgentAPI.sendMessage(userMsg, contextHistory);
 
-        if (response.data.success) {
-          const aiResponse = response.data.data.ai_response;
-          const timestamp = response.data.data.timestamp || new Date();
-          const responseTimeMs = response.data.data.response_time_ms ?? (Date.now() - clientStartTime);
+        if (res.data && res.data.success) {
+          const aiResponse = res.data.data.ai_response;
+          const timestamp = res.data.data.timestamp || new Date();
+          const responseTimeMs = res.data.data.response_time_ms ?? (Date.now() - clientStartTime);
 
           updateMessageResponse(tempId, aiResponse, timestamp, responseTimeMs);
 
           if (inputRef.current) {
             inputRef.current.focus();
           }
+          return;
         }
       } catch (backendError) {
-        const errorMsg = n8nError.response?.data?.message || n8nError.message || 'Gagal mengirim pesan';
-        toast.error(errorMsg);
-        console.error('AI Chat Error:', n8nError, backendError);
-
-        updateMessageResponse(
-          tempId,
-          'Maaf, saat ini terjadi kendala koneksi ke server AI. Silakan coba beberapa saat lagi.',
-          new Date(),
-          Date.now() - clientStartTime
-        );
+        console.error('Backend proxy also failed:', backendError);
       }
+
+      const errorMsg =
+        n8nError.name === 'AbortError'
+          ? 'Waktu tunggu respon n8n habis (timeout 60 detik).'
+          : (n8nError.message || 'Gagal memproses pesan');
+
+      toast.error(errorMsg);
+      console.error('AI Chat Error:', n8nError);
+
+      updateMessageResponse(
+        tempId,
+        'Maaf, saat ini terjadi kendala koneksi ke server AI. Silakan coba beberapa saat lagi.',
+        new Date(),
+        Date.now() - clientStartTime
+      );
     } finally {
       setLoading(false);
       setAILoading(false);

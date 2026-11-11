@@ -4,7 +4,7 @@ import axios from 'axios';
 // Send Message to AI Agent (100% diproses n8n, tanpa koneksi ke database)
 export const sendMessageToAI = async (req, res) => {
   try {
-    const { message, history } = req.body;
+    const { message, history, sessionId } = req.body;
 
     if (!message || message.trim() === '') {
       return errorResponse(res, 'Pesan tidak boleh kosong', ERROR_CODES.VALIDATION_ERROR);
@@ -18,7 +18,7 @@ export const sendMessageToAI = async (req, res) => {
       process.env.VITE_N8N_WEBHOOK ||
       'https://sekolahku-sekolahku.t4t2am.easypanel.host/webhook/470d12f5-4c3d-4234-b5bd-7a13e88779f5/chat';
 
-    const aiResponse = await callN8nChatWebhook(message, history, n8nWebhookUrl);
+    const aiResponse = await callN8nChatWebhook(message, history, n8nWebhookUrl, sessionId);
 
     const endTime = Date.now();
     const responseTimeMs = endTime - startTime;
@@ -39,10 +39,11 @@ export const sendMessageToAI = async (req, res) => {
 };
 
 // Call n8n Chat Webhook
-const callN8nChatWebhook = async (message, history = [], webhookUrl) => {
+const callN8nChatWebhook = async (message, history = [], webhookUrl, sessionId) => {
   try {
     const payload = {
       action: "sendMessage",
+      sessionId: sessionId || 'default-session',
       chatInput: message,
       message: message,
       history: history
