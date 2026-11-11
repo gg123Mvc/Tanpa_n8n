@@ -15,7 +15,7 @@ export const sendMessageToAI = async (req, res) => {
     // Proses pesan chat sepenuhnya melalui webhook n8n
     const n8nWebhookUrl =
       process.env.N8N_WEBHOOK_URL ||
-      process.env.VITE_N8N_WEBHOOK_URL ||
+      process.env.VITE_N8N_WEBHOOK ||
       'https://sekolahku-sekolahku.t4t2am.easypanel.host/webhook/470d12f5-4c3d-4234-b5bd-7a13e88779f5/chat';
 
     const aiResponse = await callN8nChatWebhook(message, history, n8nWebhookUrl);
